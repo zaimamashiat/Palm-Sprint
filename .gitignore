@@ -1,0 +1,10 @@
+
+---
+
+## 🚫 Step 4: Create `.gitignore`
+
+```txt
+gesture_env/
+__pycache__/
+*.pyc
+.env
