@@ -4,7 +4,8 @@
 ## 🚫 Step 4: Create `.gitignore`
 
 ```txt
-gesture_env/
+venv/
 __pycache__/
 *.pyc
 .env
+
