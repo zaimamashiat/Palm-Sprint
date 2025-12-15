@@ -9,90 +9,75 @@ import os
 pygame.init()
 WIDTH, HEIGHT = 800, 400
 CAM_WIDTH, CAM_HEIGHT = 200, 150
+GROUND_Y = HEIGHT - 96  # Ground level
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Cat Runner - Gesture Control")
+pygame.display.set_caption("Pixel Runner - Gesture Control")
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
 large_font = pygame.font.Font(None, 72)
 
 # -------------------- Colors --------------------
-SKY_BLUE = (135, 206, 250)
-GRASS_GREEN = (124, 252, 0)
-ORANGE = (255, 140, 66)
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GREEN = (50, 205, 50)
-YELLOW = (255, 215, 0)
-PINK = (255, 182, 193)
-DARK_PURPLE = (30, 20, 40)
-PURPLE = (80, 60, 100)
+SKY_BLUE = (135, 206, 250)
+LIGHT_BLUE = (200, 230, 255)
 
 # -------------------- Asset Loading --------------------
-class AssetLoader:
-    def __init__(self, base_path):
-        self.base_path = base_path
-        self.images = {}
-        
-    def load_image(self, filename, scale=None):
-        """Load an image and optionally scale it"""
-        try:
-            path = os.path.join(self.base_path, filename)
-            img = pygame.image.load(path).convert_alpha()
-            if scale:
-                img = pygame.transform.scale(img, scale)
-            return img
-        except:
-            print(f"Could not load: {filename}")
-            return None
-    
-    def load_from_previews(self):
-        """Load preview images from the Graveyard Kit"""
-        preview_path = os.path.join(self.base_path, "Previews")
-        if os.path.exists(preview_path):
-            for filename in os.listdir(preview_path):
-                if filename.endswith('.png'):
-                    img = self.load_image(os.path.join("Previews", filename))
-                    if img:
-                        self.images[filename] = img
-            print(f"Loaded {len(self.images)} preview images")
-        return self.images
+ASSET_PATH = r"C:\Users\zaima.nabi\Downloads\kenney_pixel-platformer"
+TILE_SIZE = 16  # Kenney's tiles are typically 16x16
 
-# Initialize asset loader
-ASSET_PATH = r"C:\Users\zaima.nabi\Downloads\kenney_graveyard-kit_5.0"
-asset_loader = AssetLoader(ASSET_PATH)
-loaded_assets = asset_loader.load_from_previews()
+def load_image(path, scale=3):
+    """Load image with error handling and scaling"""
+    try:
+        img = pygame.image.load(path).convert_alpha()
+        if scale != 1:
+            new_size = (img.get_width() * scale, img.get_height() * scale)
+            img = pygame.transform.scale(img, new_size)
+        return img
+    except Exception as e:
+        print(f"Could not load: {path} - {e}")
+        return None
 
-# Try to load some specific assets (adjust names based on what's available)
-obstacle_images = []
-background_images = []
+# Load specific tiles
+print("Loading Kenney Pixel Platformer assets...")
+ground_tile = load_image(os.path.join(ASSET_PATH, "Tiles", "tile_0082.png"), scale=3)
+coin_tile = load_image(os.path.join(ASSET_PATH, "Tiles", "tile_0067.png"), scale=2)
+heart_tile = load_image(os.path.join(ASSET_PATH, "Tiles", "tile_0044.png"), scale=2)
+obstacle_tile = load_image(os.path.join(ASSET_PATH, "Tiles", "tile_0032.png"), scale=3)
+character_tile = load_image(os.path.join(ASSET_PATH, "Tiles", "Characters", "tile_0000.png"), scale=3)
+sky_tile = load_image(os.path.join(ASSET_PATH, "Tiles", "Backgrounds", "tile_0011.png"), scale=1)
 
-# Collect tombstone/obstacle images from previews
-for name, img in loaded_assets.items():
-    if 'stone' in name.lower() or 'tomb' in name.lower() or 'grave' in name.lower():
-        # Scale to appropriate size for obstacles
-        scaled = pygame.transform.scale(img, (60, 80))
-        obstacle_images.append(scaled)
-    elif 'fence' in name.lower() or 'wall' in name.lower():
-        scaled = pygame.transform.scale(img, (50, 60))
-        obstacle_images.append(scaled)
+player_sprites = {
+    'idle': character_tile,
+    'run': [character_tile] if character_tile else [],
+    'jump': character_tile,
+    'duck': character_tile
+}
 
-print(f"Found {len(obstacle_images)} obstacle images")
+print(f"✓ Ground tile: {'Loaded' if ground_tile else 'Failed'}")
+print(f"✓ Coin tile: {'Loaded' if coin_tile else 'Failed'}")
+print(f"✓ Heart tile: {'Loaded' if heart_tile else 'Failed'}")
+print(f"✓ Obstacle tile: {'Loaded' if obstacle_tile else 'Failed'}")
+print(f"✓ Character tile: {'Loaded' if character_tile else 'Failed'}")
+print(f"✓ Sky tile: {'Loaded' if sky_tile else 'Failed'}")
 
-# -------------------- Player (Cat) --------------------
-class Cat:
+# -------------------- Player --------------------
+class Player:
     def __init__(self):
         self.x = 100
-        self.y = 300
-        self.width = 32
-        self.height = 40
+        self.width = 48
+        self.height = 48
         self.y_velocity = 0
         self.gravity = 0.5
         self.jump_strength = -15
         self.is_jumping = False
         self.is_ducking = False
-        self.run_cycle = 0
-        self.normal_height = 40
-        self.duck_height = 25
+        self.run_frame = 0
+        self.animation_speed = 0.2
+        self.y = GROUND_Y - self.height
+        self.health = 3
+        self.invulnerable = False
+        self.invuln_timer = 0
         
     def jump(self):
         if not self.is_jumping and not self.is_ducking:
@@ -100,196 +85,176 @@ class Cat:
             self.is_jumping = True
     
     def force_fall(self):
-        """Immediately cancel jump and fall faster"""
         if self.is_jumping:
-            self.y_velocity = 8  # Strong downward velocity
+            self.y_velocity = 8
             self.is_jumping = False
     
     def duck(self):
         if not self.is_jumping:
             self.is_ducking = True
-            self.height = self.duck_height
-            self.y = 315
+            self.y = GROUND_Y - 30
         
     def stand(self):
         self.is_ducking = False
-        self.height = self.normal_height
         if not self.is_jumping:
-            self.y = 300
+            self.y = GROUND_Y - self.height
     
-    def update(self):
-        self.run_cycle = (self.run_cycle + 1) % 20
+    def take_damage(self):
+        if not self.invulnerable:
+            self.health -= 1
+            self.invulnerable = True
+            self.invuln_timer = 2.0  # 2 seconds invulnerability
+            return self.health <= 0
+        return False
+    
+    def update(self, dt):
+        if not self.is_jumping and not self.is_ducking and player_sprites['run']:
+            self.run_frame = (self.run_frame + self.animation_speed) % len(player_sprites['run'])
         
-        # Apply gravity
         self.y_velocity += self.gravity
         self.y += self.y_velocity
         
-        # Ground collision
-        ground_y = 315 if self.is_ducking else 300
-        if self.y >= ground_y:
-            self.y = ground_y
+        ground_level = GROUND_Y - (30 if self.is_ducking else self.height)
+        if self.y >= ground_level:
+            self.y = ground_level
             self.y_velocity = 0
             self.is_jumping = False
+        
+        # Update invulnerability
+        if self.invulnerable:
+            self.invuln_timer -= dt
+            if self.invuln_timer <= 0:
+                self.invulnerable = False
     
     def draw(self, screen):
-        # Draw with spooky theme colors
-        cat_color = (200, 180, 255)  # Light purple/ghost cat
+        # Flicker during invulnerability
+        if self.invulnerable and int(self.invuln_timer * 10) % 2 == 0:
+            return
         
-        if self.is_ducking:
-            # Ducking cat
-            pygame.draw.ellipse(screen, cat_color, (self.x + 5, self.y + 10, 25, 15))
-            pygame.draw.ellipse(screen, (255, 200, 255), (self.x + 9, self.y + 12, 17, 10))
-            pygame.draw.circle(screen, cat_color, (self.x + 8, self.y + 8), 8)
-            pygame.draw.circle(screen, (255, 200, 255), (self.x + 8, self.y + 10), 4)
-            
-            # Glowing eyes
-            pygame.draw.circle(screen, (0, 255, 200), (self.x + 6, self.y + 7), 2)
-            pygame.draw.circle(screen, (0, 255, 200), (self.x + 10, self.y + 7), 2)
-            
-            # Ears
-            ear_points_l = [(self.x + 3, self.y + 3), (self.x + 2, self.y + 8), (self.x + 7, self.y + 6)]
-            ear_points_r = [(self.x + 13, self.y + 3), (self.x + 9, self.y + 6), (self.x + 14, self.y + 8)]
-            pygame.draw.polygon(screen, cat_color, ear_points_l)
-            pygame.draw.polygon(screen, cat_color, ear_points_r)
-            
-            pygame.draw.ellipse(screen, cat_color, (self.x + 28, self.y + 12, 6, 8))
-            pygame.draw.ellipse(screen, cat_color, (self.x + 10, self.y + 20, 5, 8))
-            pygame.draw.ellipse(screen, cat_color, (self.x + 20, self.y + 20, 5, 8))
+        # Use character tile for all states
+        sprite = character_tile
+        
+        if sprite:
+            screen.blit(sprite, (self.x, self.y))
         else:
-            # Standing/jumping cat
-            pygame.draw.ellipse(screen, cat_color, (self.x + self.width, self.y + 10, 8, 25))
-            pygame.draw.ellipse(screen, cat_color, (self.x + 5, self.y + 15, 20, 25))
-            pygame.draw.ellipse(screen, (255, 200, 255), (self.x + 9, self.y + 20, 12, 15))
-            
-            pygame.draw.circle(screen, cat_color, (self.x + 16, self.y + 10), 12)
-            pygame.draw.circle(screen, (255, 200, 255), (self.x + 16, self.y + 14), 6)
-            
-            # Ears with glow
-            ear_points_l = [(self.x + 8, self.y + 2), (self.x + 6, self.y + 10), (self.x + 12, self.y + 8)]
-            ear_points_r = [(self.x + 24, self.y + 2), (self.x + 20, self.y + 8), (self.x + 26, self.y + 10)]
-            pygame.draw.polygon(screen, cat_color, ear_points_l)
-            pygame.draw.polygon(screen, cat_color, ear_points_r)
-            
-            # Glowing cyan eyes
-            pygame.draw.circle(screen, (0, 255, 255), (self.x + 12, self.y + 9), 4)
-            pygame.draw.circle(screen, (0, 255, 255), (self.x + 20, self.y + 9), 4)
-            pygame.draw.circle(screen, (0, 255, 200), (self.x + 12, self.y + 9), 2)
-            pygame.draw.circle(screen, (0, 255, 200), (self.x + 20, self.y + 9), 2)
-            
-            # Legs
-            leg_offset = 15 if self.run_cycle > 10 else -15
-            if not self.is_jumping:
-                pygame.draw.ellipse(screen, cat_color, (self.x + 8, self.y + 35 + leg_offset//2, 6, 15))
-                pygame.draw.ellipse(screen, cat_color, (self.x + 18, self.y + 35 - leg_offset//2, 6, 15))
-            else:
-                pygame.draw.ellipse(screen, cat_color, (self.x + 8, self.y + 35, 6, 12))
-                pygame.draw.ellipse(screen, cat_color, (self.x + 18, self.y + 35, 6, 12))
-            
-            pygame.draw.circle(screen, (255, 200, 255), (self.x + 11, self.y + 47), 3)
-            pygame.draw.circle(screen, (255, 200, 255), (self.x + 21, self.y + 47), 3)
+            color = (100, 200, 255)
+            pygame.draw.rect(screen, color, (self.x, self.y, self.width, self.height))
+        
+        # Shadow
+        shadow_surf = pygame.Surface((self.width, 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow_surf, (0, 0, 0, 60), (0, 0, self.width, 8))
+        screen.blit(shadow_surf, (self.x, GROUND_Y + 2))
     
     def get_rect(self):
-        return pygame.Rect(self.x + 8, self.y, self.width - 8, self.height)
+        return pygame.Rect(self.x + 8, self.y + 5, self.width - 16, self.height - 10)
 
 # -------------------- Obstacle --------------------
-class Pipe:
+class Obstacle:
     def __init__(self, x, obstacle_type="ground"):
         self.x = x
-        self.width = 60
-        self.height = random.randint(50, 70)
-        self.speed = 3
-        self.passed = False
         self.type = obstacle_type
-        
-        # Try to use loaded images
-        self.image = None
-        if obstacle_images and obstacle_type == "ground":
-            self.image = random.choice(obstacle_images)
-            self.width = self.image.get_width()
-            self.height = self.image.get_height()
+        self.speed = 3
         
         if self.type == "air":
+            self.width = 48
+            self.height = random.randint(80, 120)
             self.y = 0
-            self.height = random.randint(100, 140)
         else:
-            self.y = HEIGHT - 96 - self.height
+            if obstacle_tile:
+                self.width = obstacle_tile.get_width()
+                self.height = obstacle_tile.get_height()
+            else:
+                self.width = 40
+                self.height = 60
+            
+            self.y = GROUND_Y - self.height
     
     def update(self):
         self.x -= self.speed
     
     def draw(self, screen):
-        if self.image and self.type == "ground":
-            # Draw the loaded image
-            screen.blit(self.image, (self.x, self.y))
+        if self.type == "air":
+            # Hanging obstacle
+            pygame.draw.rect(screen, (180, 60, 60), (self.x, self.y, self.width, self.height))
+            pygame.draw.rect(screen, (220, 100, 100), (self.x + 4, self.y, 4, self.height))
+            # Spikes at bottom
+            spike_points = []
+            for i in range(5):
+                spike_x = self.x + (self.width / 5) * i
+                spike_points.append((spike_x, self.height))
+                spike_points.append((spike_x + self.width/10, self.height + 10))
+            if len(spike_points) > 2:
+                pygame.draw.polygon(screen, (150, 40, 40), spike_points[:6])
         else:
-            # Fallback to drawing shapes
-            if self.type == "air":
-                # Hanging obstacle
-                pygame.draw.rect(screen, (60, 40, 80), (self.x, self.y, self.width, self.height))
-                pygame.draw.rect(screen, (80, 60, 100), (self.x + 4, self.y, 4, self.height))
-                points = [(self.x - 4, self.height), (self.x + self.width + 4, self.height),
-                         (self.x + self.width, self.height + 8), (self.x, self.height + 8)]
-                pygame.draw.polygon(screen, (50, 30, 70), points)
-                pygame.draw.rect(screen, (50, 30, 70), (self.x - 4, 0, self.width + 8, 8))
+            if obstacle_tile:
+                screen.blit(obstacle_tile, (self.x, self.y))
             else:
-                # Ground tombstone-style obstacle
-                pygame.draw.rect(screen, (80, 80, 100), (self.x, self.y, self.width, self.height))
-                pygame.draw.rect(screen, (100, 100, 120), (self.x + 4, self.y, 4, self.height))
-                # Top rounded part
-                pygame.draw.ellipse(screen, (80, 80, 100), (self.x, self.y - 15, self.width, 30))
-                # RIP text
-                rip_font = pygame.font.Font(None, 20)
-                rip_text = rip_font.render("RIP", True, (40, 40, 60))
-                screen.blit(rip_text, (self.x + self.width//2 - 15, self.y + 10))
+                pygame.draw.rect(screen, (200, 80, 80), (self.x, self.y, self.width, self.height))
+            
+            # Shadow
+            shadow_surf = pygame.Surface((self.width, 8), pygame.SRCALPHA)
+            pygame.draw.ellipse(shadow_surf, (0, 0, 0, 80), (0, 0, self.width, 8))
+            screen.blit(shadow_surf, (self.x, GROUND_Y + 2))
     
     def get_rect(self):
         if self.type == "air":
-            return pygame.Rect(self.x + 8, 0, self.width - 16, self.height + 8)
-        else:
-            return pygame.Rect(self.x + 8, self.y, self.width - 16, self.height)
+            return pygame.Rect(self.x + 8, 0, self.width - 16, self.height + 10)
+        return pygame.Rect(self.x + 8, self.y + 5, self.width - 16, self.height - 5)
     
     def off_screen(self):
         return self.x < -self.width
 
-# -------------------- Coin (Soul) --------------------
-class Coin:
+# -------------------- Collectible --------------------
+class Collectible:
     def __init__(self, x):
         self.x = x
         height_options = [
-            random.randint(250, 280),
-            random.randint(200, 240),
-            random.randint(140, 190)
+            GROUND_Y - 30,
+            GROUND_Y - 80,
+            GROUND_Y - 140
         ]
         self.y = random.choice(height_options)
-        self.radius = 12
         self.speed = 3
         self.collected = False
         self.angle = 0
         self.float_offset = 0
+        
+        if coin_tile:
+            self.width = coin_tile.get_width()
+            self.height = coin_tile.get_height()
+        else:
+            self.width = 24
+            self.height = 24
     
     def update(self):
         self.x -= self.speed
-        self.angle = (self.angle + 5) % 360
-        self.float_offset = math.sin(self.angle * 0.1) * 3
+        self.angle = (self.angle + 3) % 360
+        self.float_offset = math.sin(self.angle * 0.1) * 4
     
     def draw(self, screen):
-        y_pos = self.y + self.float_offset
-        # Ghost soul instead of coin
-        # Outer glow
-        pygame.draw.circle(screen, (100, 200, 255, 100), (int(self.x), int(y_pos)), self.radius + 6)
-        pygame.draw.circle(screen, (150, 220, 255), (int(self.x), int(y_pos)), self.radius + 3)
-        # Soul body
-        pygame.draw.circle(screen, (200, 240, 255), (int(self.x), int(y_pos)), self.radius)
-        pygame.draw.circle(screen, WHITE, (int(self.x), int(y_pos)), self.radius - 3)
-        # Eyes
-        pygame.draw.circle(screen, (100, 150, 200), (int(self.x - 3), int(y_pos - 2)), 2)
-        pygame.draw.circle(screen, (100, 150, 200), (int(self.x + 3), int(y_pos - 2)), 2)
+        y_pos = int(self.y + self.float_offset)
+        
+        if coin_tile:
+            # Rotate the coin for visual effect
+            rotated = pygame.transform.rotate(coin_tile, self.angle)
+            rect = rotated.get_rect(center=(self.x, y_pos))
+            
+            # Glow effect
+            glow_surf = pygame.Surface((self.width + 20, self.height + 20), pygame.SRCALPHA)
+            pygame.draw.circle(glow_surf, (255, 255, 150, 60), 
+                             (self.width//2 + 10, self.height//2 + 10), self.width//2 + 10)
+            screen.blit(glow_surf, (rect.centerx - self.width//2 - 10, rect.centery - self.height//2 - 10))
+            
+            screen.blit(rotated, rect)
+        else:
+            pygame.draw.circle(screen, (255, 255, 100), (self.x, y_pos), 12)
+            pygame.draw.circle(screen, (255, 215, 0), (self.x, y_pos), 10)
     
     def get_rect(self):
-        return pygame.Rect(self.x - self.radius, self.y - self.radius, self.radius * 2, self.radius * 2)
+        return pygame.Rect(self.x - self.width//2, self.y - self.height//2, self.width, self.height)
     
     def off_screen(self):
-        return self.x < -self.radius * 2
+        return self.x < -self.width
 
 # -------------------- MediaPipe --------------------
 mp_hands = mp.solutions.hands
@@ -307,14 +272,15 @@ def is_fist(hand_landmarks):
     return folded >= 3
 
 # -------------------- Game Variables --------------------
-cat = Cat()
-pipes = []
-coins = []
+player = Player()
+obstacles = []
+collectibles = []
 score = 0
 game_over = False
-pipe_timer = 0
-coin_timer = 0
+obstacle_timer = 0
+collectible_timer = 0
 gesture_speed = 3
+ground_scroll = 0
 
 # -------------------- Game Loop --------------------
 running = True
@@ -327,20 +293,20 @@ while running:
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE:
                 if game_over:
-                    cat = Cat()
-                    pipes = []
-                    coins = []
+                    player = Player()
+                    obstacles = []
+                    collectibles = []
                     score = 0
                     game_over = False
-                    pipe_timer = 0
-                    coin_timer = 0
+                    obstacle_timer = 0
+                    collectible_timer = 0
                 else:
-                    cat.jump()
+                    player.jump()
             if event.key == pygame.K_DOWN:
-                cat.duck()
+                player.duck()
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_DOWN:
-                cat.stand()
+                player.stand()
     
     if not game_over:
         # Hand Input
@@ -384,79 +350,89 @@ while running:
             frame_surface = pygame.surfarray.make_surface(frame_resized.swapaxes(0, 1))
             
             if jump_command:
-                cat.jump()
+                player.jump()
             if duck_command:
-                cat.force_fall()
-                cat.duck()
+                player.force_fall()
+                player.duck()
             else:
-                cat.stand()
+                player.stand()
         
-        cat.update()
+        player.update(dt)
         
-        pipe_timer += dt
-        if pipe_timer > 2.5:
+        # Scroll ground
+        ground_scroll = (ground_scroll + gesture_speed) % 48
+        
+        # Spawn obstacles
+        obstacle_timer += dt
+        if obstacle_timer > 2.5:
             obstacle_type = random.choice(["ground", "ground", "air"])
-            pipes.append(Pipe(WIDTH, obstacle_type))
-            pipe_timer = 0
+            obstacles.append(Obstacle(WIDTH, obstacle_type))
+            obstacle_timer = 0
         
-        coin_timer += dt
-        if coin_timer > 1.5:
-            coins.append(Coin(WIDTH))
-            coin_timer = 0
+        # Spawn collectibles
+        collectible_timer += dt
+        if collectible_timer > 1.5:
+            collectibles.append(Collectible(WIDTH))
+            collectible_timer = 0
         
-        for pipe in pipes[:]:
-            pipe.speed = gesture_speed
-            pipe.update()
-            if cat.get_rect().colliderect(pipe.get_rect()):
-                game_over = True
-            if pipe.off_screen():
-                pipes.remove(pipe)
+        # Update obstacles
+        for obstacle in obstacles[:]:
+            obstacle.speed = gesture_speed
+            obstacle.update()
+            if player.get_rect().colliderect(obstacle.get_rect()):
+                if player.take_damage():
+                    game_over = True
+            if obstacle.off_screen():
+                obstacles.remove(obstacle)
         
-        for coin in coins[:]:
-            coin.speed = gesture_speed
-            coin.update()
-            if not coin.collected and cat.get_rect().colliderect(coin.get_rect()):
-                coin.collected = True
+        # Update collectibles
+        for collectible in collectibles[:]:
+            collectible.speed = gesture_speed
+            collectible.update()
+            if not collectible.collected and player.get_rect().colliderect(collectible.get_rect()):
+                collectible.collected = True
                 score += 10
-                coins.remove(coin)
-            if coin.off_screen():
-                coins.remove(coin)
+                collectibles.remove(collectible)
+            if collectible.off_screen():
+                collectibles.remove(collectible)
     
     # -------------------- Render --------------------
-    # Spooky dark sky gradient
-    for y in range(HEIGHT - 96):
-        color_ratio = y / (HEIGHT - 96)
-        r = int(30 + (60 - 30) * color_ratio)
-        g = int(20 + (40 - 20) * color_ratio)
-        b = int(50 + (80 - 50) * color_ratio)
+    # Sky gradient
+    for y in range(GROUND_Y):
+        ratio = y / GROUND_Y
+        r = int(135 + (200 - 135) * ratio)
+        g = int(206 + (230 - 206) * ratio)
+        b = int(250 + (255 - 250) * ratio)
         pygame.draw.line(screen, (r, g, b), (0, y), (WIDTH, y))
     
-    # Dark ground
-    pygame.draw.rect(screen, (40, 50, 40), (0, HEIGHT - 96, WIDTH, 96))
-    pygame.draw.line(screen, (60, 70, 60), (0, HEIGHT - 96), (WIDTH, HEIGHT - 96), 2)
+    # Draw ground with tiles
+    if ground_tile:
+        tile_width = ground_tile.get_width()
+        for x in range(-tile_width, WIDTH + tile_width, tile_width):
+            tile_x = x - ground_scroll
+            screen.blit(ground_tile, (tile_x, GROUND_Y))
+            screen.blit(ground_tile, (tile_x, GROUND_Y + 48))
+    else:
+        pygame.draw.rect(screen, (100, 200, 100), (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
     
-    # Dead grass
-    for i in range(0, WIDTH, 16):
-        grass_height = random.randint(4, 8)
-        pygame.draw.line(screen, (50, 60, 50), (i, HEIGHT - 96), (i, HEIGHT - 96 - grass_height), 2)
+    # Ground line
+    pygame.draw.line(screen, (80, 160, 80), (0, GROUND_Y), (WIDTH, GROUND_Y), 2)
     
-    # Moon instead of sun
-    pygame.draw.circle(screen, (200, 200, 220), (WIDTH - 60, 40), 35)
-    pygame.draw.circle(screen, (230, 230, 250), (WIDTH - 60, 40), 30)
+    # Clouds
+    for cx in [100, 300, 500, 700]:
+        cloud_x = (cx + ground_scroll * 0.3) % (WIDTH + 100)
+        pygame.draw.ellipse(screen, WHITE, (cloud_x, 50, 60, 25))
+        pygame.draw.ellipse(screen, WHITE, (cloud_x + 15, 45, 50, 25))
+        pygame.draw.ellipse(screen, WHITE, (cloud_x + 30, 50, 40, 20))
     
-    # Dark clouds
-    for cx in [100, 300, 600]:
-        pygame.draw.ellipse(screen, (50, 50, 70), (cx, 40, 60, 25))
-        pygame.draw.ellipse(screen, (50, 50, 70), (cx + 15, 35, 50, 25))
-        pygame.draw.ellipse(screen, (50, 50, 70), (cx + 30, 40, 40, 20))
+    # Draw game objects
+    for obstacle in obstacles:
+        obstacle.draw(screen)
     
-    for pipe in pipes:
-        pipe.draw(screen)
+    for collectible in collectibles:
+        collectible.draw(screen)
     
-    for coin in coins:
-        coin.draw(screen)
-    
-    cat.draw(screen)
+    player.draw(screen)
     
     # Camera feed
     if ret:
@@ -466,7 +442,7 @@ while running:
         
         status_font = pygame.font.Font(None, 16)
         
-        left_color = (0, 255, 0) if "JUMP" in left_hand_status else (255, 100, 255) if "DUCK" in left_hand_status else (255, 255, 255)
+        left_color = (0, 255, 0) if "JUMP" in left_hand_status else (255, 100, 255) if "DUCK" in left_hand_status else WHITE
         left_text = status_font.render(f"L: {left_hand_status}", True, left_color)
         left_bg = pygame.Surface((left_text.get_width() + 8, left_text.get_height() + 4))
         left_bg.fill(BLACK)
@@ -474,7 +450,7 @@ while running:
         screen.blit(left_bg, (cam_x + 3, cam_y + 3))
         screen.blit(left_text, (cam_x + 7, cam_y + 5))
         
-        right_color = (255, 165, 0) if "FAST" in right_hand_status else (100, 100, 255) if "SLOW" in right_hand_status else (255, 255, 255)
+        right_color = (255, 165, 0) if "FAST" in right_hand_status else (100, 100, 255) if "SLOW" in right_hand_status else WHITE
         right_text = status_font.render(f"R: {right_hand_status}", True, right_color)
         right_bg = pygame.Surface((right_text.get_width() + 8, right_text.get_height() + 4))
         right_bg.fill(BLACK)
@@ -482,26 +458,32 @@ while running:
         screen.blit(right_bg, (cam_x + 3, cam_y + 23))
         screen.blit(right_text, (cam_x + 7, cam_y + 25))
     
-    # Score (souls collected)
-    score_text = font.render(f"Souls: {score // 10}", True, (150, 220, 255))
+    # Score
+    score_text = font.render(f"Score: {score // 10}", True, (255, 200, 50))
     score_bg = pygame.Surface((score_text.get_width() + 20, score_text.get_height() + 10))
     score_bg.fill(BLACK)
     score_bg.set_alpha(150)
     screen.blit(score_bg, (10, 10))
     screen.blit(score_text, (20, 15))
     
+    # Health display
+    if heart_tile:
+        for i in range(player.health):
+            screen.blit(heart_tile, (20 + i * 40, 60))
+    else:
+        health_text = font.render(f"Health: {player.health}", True, (255, 50, 50))
+        screen.blit(health_text, (20, 60))
+    
     # Instructions
     inst_font = pygame.font.Font(None, 18)
     inst1 = inst_font.render("Left: Open=Jump, Fist=Duck", True, WHITE)
     inst2 = inst_font.render("Right: Open=Fast, Fist=Slow", True, WHITE)
-    inst3 = inst_font.render("Keys: SPACE=Jump, DOWN=Duck", True, WHITE)
-    inst_bg = pygame.Surface((280, 75))
+    inst_bg = pygame.Surface((250, 50))
     inst_bg.fill(BLACK)
     inst_bg.set_alpha(150)
-    screen.blit(inst_bg, (WIDTH - 290, HEIGHT - 85))
-    screen.blit(inst1, (WIDTH - 280, HEIGHT - 80))
-    screen.blit(inst2, (WIDTH - 280, HEIGHT - 60))
-    screen.blit(inst3, (WIDTH - 280, HEIGHT - 40))
+    screen.blit(inst_bg, (WIDTH - 260, HEIGHT - 60))
+    screen.blit(inst1, (WIDTH - 250, HEIGHT - 55))
+    screen.blit(inst2, (WIDTH - 250, HEIGHT - 35))
     
     if game_over:
         overlay = pygame.Surface((WIDTH, HEIGHT))
@@ -510,7 +492,7 @@ while running:
         screen.blit(overlay, (0, 0))
         
         game_over_text = large_font.render("GAME OVER", True, (255, 100, 100))
-        final_score_text = font.render(f"Final Score: {score // 10}", True, (150, 220, 255))
+        final_score_text = font.render(f"Final Score: {score // 10}", True, (255, 200, 50))
         restart_text = font.render("Press SPACE to Restart", True, WHITE)
         
         screen.blit(game_over_text, (WIDTH // 2 - game_over_text.get_width() // 2, HEIGHT // 2 - 80))
