@@ -21,3 +21,4 @@ Players control speed and actions using real-time hand gestures captured via web
 ```bash
 pip install -r requirements.txt
 python gesture_game.py
+#https://kenney.nl/assets/voxel-pack
