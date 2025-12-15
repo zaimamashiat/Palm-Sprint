@@ -23,7 +23,7 @@ SKY_BLUE = (135, 206, 250)
 LIGHT_BLUE = (200, 230, 255)
 
 # -------------------- Asset Loading --------------------
-ASSET_PATH = r"C:\Users\zaima.nabi\Downloads\kenney_pixel-platformer"
+ASSET_PATH = r"C:\Users\zaima.nabi\Documents\GitHub\Palm-Sprint\kenney_pixel-platformer"
 TILE_SIZE = 16  # Kenney's tiles are typically 16x16
 
 def load_image(path, scale=3):
