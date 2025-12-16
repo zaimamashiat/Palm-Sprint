@@ -4,7 +4,6 @@ import mediapipe as mp
 import random
 import math
 import os
-
 # -------------------- Setup --------------------
 pygame.init()
 WIDTH, HEIGHT = 800, 400
