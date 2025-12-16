@@ -11,7 +11,7 @@ WIDTH, HEIGHT = 800, 400
 CAM_WIDTH, CAM_HEIGHT = 200, 150
 GROUND_Y = HEIGHT - 96  # Ground level
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Pixel Runner - Gesture Control")
+pygame.display.set_caption("Pixel Runner - Gesture Combat")
 clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
 large_font = pygame.font.Font(None, 72)
@@ -21,9 +21,11 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 SKY_BLUE = (135, 206, 250)
 LIGHT_BLUE = (200, 230, 255)
+RED = (255, 50, 50)
+YELLOW = (255, 255, 100)
 
 # -------------------- Asset Loading --------------------
-ASSET_PATH = r"C:\Users\zaima.nabi\Documents\GitHub\Palm-Sprint\kenney_pixel-platformer"
+ASSET_PATH = r"C:\Users\zaima\OneDrive\Documents\GitHub\Palm-Sprint\kenney_pixel-platformer"
 TILE_SIZE = 16  # Kenney's tiles are typically 16x16
 
 def load_image(path, scale=3):
@@ -61,6 +63,104 @@ print(f"✓ Obstacle tile: {'Loaded' if obstacle_tile else 'Failed'}")
 print(f"✓ Character tile: {'Loaded' if character_tile else 'Failed'}")
 print(f"✓ Sky tile: {'Loaded' if sky_tile else 'Failed'}")
 
+# -------------------- Projectile --------------------
+class Projectile:
+    def __init__(self, x, y, direction, shooter="player"):
+        self.x = x
+        self.y = y
+        self.direction = direction  # 1 for right, -1 for left
+        self.speed = 8
+        self.width = 12
+        self.height = 6
+        self.shooter = shooter
+        self.color = YELLOW if shooter == "player" else RED
+        
+    def update(self):
+        self.x += self.speed * self.direction
+    
+    def draw(self, screen):
+        # Bullet with glow
+        glow_surf = pygame.Surface((self.width + 10, self.height + 10), pygame.SRCALPHA)
+        pygame.draw.ellipse(glow_surf, (*self.color, 80), (0, 0, self.width + 10, self.height + 10))
+        screen.blit(glow_surf, (self.x - 5, self.y - 5))
+        
+        pygame.draw.ellipse(screen, self.color, (self.x, self.y, self.width, self.height))
+        pygame.draw.ellipse(screen, WHITE, (self.x + 2, self.y + 1, self.width - 6, self.height - 3))
+    
+    def get_rect(self):
+        return pygame.Rect(self.x, self.y, self.width, self.height)
+    
+    def off_screen(self):
+        return self.x < -20 or self.x > WIDTH + 20
+
+# -------------------- Enemy --------------------
+class Enemy:
+    def __init__(self, x):
+        self.x = x
+        self.y = GROUND_Y - 60
+        self.width = 50
+        self.height = 60
+        self.speed = 2
+        self.health = 3
+        self.shoot_timer = 0
+        self.shoot_cooldown = 2.0
+        self.color = (180, 50, 50)
+        self.flash_timer = 0
+        
+    def update(self, dt):
+        self.x -= self.speed
+        self.shoot_timer += dt
+        if self.flash_timer > 0:
+            self.flash_timer -= dt
+        
+    def can_shoot(self):
+        return self.shoot_timer >= self.shoot_cooldown
+    
+    def shoot(self):
+        self.shoot_timer = 0
+        return Projectile(self.x, self.y + self.height // 2, -1, "enemy")
+    
+    def take_damage(self):
+        self.health -= 1
+        self.flash_timer = 0.2
+        return self.health <= 0
+    
+    def draw(self, screen):
+        color = WHITE if self.flash_timer > 0 else self.color
+        
+        # Body
+        pygame.draw.rect(screen, color, (self.x, self.y, self.width, self.height))
+        pygame.draw.rect(screen, (150, 30, 30), (self.x + 4, self.y + 4, self.width - 8, self.height - 8))
+        
+        # Eye
+        eye_y = self.y + 15
+        pygame.draw.circle(screen, RED, (int(self.x + 15), eye_y), 8)
+        pygame.draw.circle(screen, (255, 100, 100), (int(self.x + 15), eye_y), 5)
+        
+        # Gun barrel
+        gun_width = 25
+        gun_height = 8
+        pygame.draw.rect(screen, (80, 80, 80), (self.x - gun_width, self.y + self.height // 2 - gun_height // 2, gun_width, gun_height))
+        pygame.draw.circle(screen, (100, 100, 100), (int(self.x - gun_width), int(self.y + self.height // 2)), 6)
+        
+        # Health bar
+        bar_width = self.width
+        bar_height = 6
+        pygame.draw.rect(screen, (80, 80, 80), (self.x, self.y - 15, bar_width, bar_height))
+        health_width = (self.health / 3) * bar_width
+        pygame.draw.rect(screen, (255, 50, 50), (self.x, self.y - 15, health_width, bar_height))
+        
+        # Shadow
+        shadow_surf = pygame.Surface((self.width, 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(shadow_surf, (0, 0, 0, 80), (0, 0, self.width, 8))
+        screen.blit(shadow_surf, (self.x, GROUND_Y + 2))
+    
+    def get_rect(self):
+        return pygame.Rect(self.x + 5, self.y + 5, self.width - 10, self.height - 5)
+    
+    def off_screen(self):
+        return self.x < -self.width
+
 # -------------------- Player --------------------
 class Player:
     def __init__(self):
@@ -78,6 +178,8 @@ class Player:
         self.health = 3
         self.invulnerable = False
         self.invuln_timer = 0
+        self.shoot_cooldown = 0.3
+        self.shoot_timer = 0
         
     def jump(self):
         if not self.is_jumping and not self.is_ducking:
@@ -98,6 +200,16 @@ class Player:
         self.is_ducking = False
         if not self.is_jumping:
             self.y = GROUND_Y - self.height
+    
+    def can_shoot(self):
+        return self.shoot_timer <= 0
+    
+    def shoot(self):
+        if self.can_shoot():
+            self.shoot_timer = self.shoot_cooldown
+            shoot_y = self.y + self.height // 2 if not self.is_ducking else self.y + 15
+            return Projectile(self.x + self.width, shoot_y, 1, "player")
+        return None
     
     def take_damage(self):
         if not self.invulnerable:
@@ -125,6 +237,10 @@ class Player:
             self.invuln_timer -= dt
             if self.invuln_timer <= 0:
                 self.invulnerable = False
+        
+        # Update shoot cooldown
+        if self.shoot_timer > 0:
+            self.shoot_timer -= dt
     
     def draw(self, screen):
         # Flicker during invulnerability
@@ -271,14 +387,41 @@ def is_fist(hand_landmarks):
             folded += 1
     return folded >= 3
 
+def is_gun_gesture(hand_landmarks):
+    # Gun gesture: index and thumb extended, others folded
+    index_tip = hand_landmarks.landmark[8]
+    index_pip = hand_landmarks.landmark[6]
+    thumb_tip = hand_landmarks.landmark[4]
+    thumb_ip = hand_landmarks.landmark[3]
+    middle_tip = hand_landmarks.landmark[12]
+    middle_pip = hand_landmarks.landmark[10]
+    ring_tip = hand_landmarks.landmark[16]
+    ring_pip = hand_landmarks.landmark[14]
+    pinky_tip = hand_landmarks.landmark[20]
+    pinky_pip = hand_landmarks.landmark[18]
+    
+    # Index extended
+    index_extended = index_tip.y < index_pip.y
+    # Thumb extended
+    thumb_extended = thumb_tip.x < thumb_ip.x or thumb_tip.x > thumb_ip.x  # Check if thumb is out
+    # Middle, ring, pinky folded
+    middle_folded = middle_tip.y > middle_pip.y
+    ring_folded = ring_tip.y > ring_pip.y
+    pinky_folded = pinky_tip.y > pinky_pip.y
+    
+    return index_extended and (middle_folded or ring_folded or pinky_folded)
+
 # -------------------- Game Variables --------------------
 player = Player()
 obstacles = []
 collectibles = []
+enemies = []
+projectiles = []
 score = 0
 game_over = False
 obstacle_timer = 0
 collectible_timer = 0
+enemy_timer = 0
 gesture_speed = 3
 ground_scroll = 0
 
@@ -296,14 +439,21 @@ while running:
                     player = Player()
                     obstacles = []
                     collectibles = []
+                    enemies = []
+                    projectiles = []
                     score = 0
                     game_over = False
                     obstacle_timer = 0
                     collectible_timer = 0
+                    enemy_timer = 0
                 else:
                     player.jump()
             if event.key == pygame.K_DOWN:
                 player.duck()
+            if event.key == pygame.K_f:  # F key to shoot (backup)
+                bullet = player.shoot()
+                if bullet:
+                    projectiles.append(bullet)
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_DOWN:
                 player.stand()
@@ -319,6 +469,7 @@ while running:
             gesture_speed = 3
             jump_command = False
             duck_command = False
+            shoot_command = False
             left_hand_status = "No hand"
             right_hand_status = "No hand"
             
@@ -331,7 +482,10 @@ while running:
                         mp_drawing.DrawingSpec(color=(255, 255, 0), thickness=2))
                     
                     if label == "Right":
-                        if is_fist(hand_landmarks):
+                        if is_gun_gesture(hand_landmarks):
+                            shoot_command = True
+                            right_hand_status = "GUN - SHOOT!"
+                        elif is_fist(hand_landmarks):
                             gesture_speed = 2
                             right_hand_status = "FIST - SLOW"
                         else:
@@ -356,6 +510,11 @@ while running:
                 player.duck()
             else:
                 player.stand()
+            
+            if shoot_command:
+                bullet = player.shoot()
+                if bullet:
+                    projectiles.append(bullet)
         
         player.update(dt)
         
@@ -374,6 +533,12 @@ while running:
         if collectible_timer > 1.5:
             collectibles.append(Collectible(WIDTH))
             collectible_timer = 0
+        
+        # Spawn enemies
+        enemy_timer += dt
+        if enemy_timer > 5.0:
+            enemies.append(Enemy(WIDTH))
+            enemy_timer = 0
         
         # Update obstacles
         for obstacle in obstacles[:]:
@@ -395,6 +560,47 @@ while running:
                 collectibles.remove(collectible)
             if collectible.off_screen():
                 collectibles.remove(collectible)
+        
+        # Update enemies
+        for enemy in enemies[:]:
+            enemy.speed = gesture_speed
+            enemy.update(dt)
+            
+            # Enemy shoots
+            if enemy.can_shoot() and enemy.x < WIDTH - 100:
+                projectiles.append(enemy.shoot())
+            
+            # Check collision with player
+            if player.get_rect().colliderect(enemy.get_rect()):
+                if player.take_damage():
+                    game_over = True
+            
+            if enemy.off_screen():
+                enemies.remove(enemy)
+        
+        # Update projectiles
+        for projectile in projectiles[:]:
+            projectile.update()
+            
+            # Check projectile collisions
+            if projectile.shooter == "player":
+                # Check hit on enemies
+                for enemy in enemies[:]:
+                    if projectile.get_rect().colliderect(enemy.get_rect()):
+                        if enemy.take_damage():
+                            enemies.remove(enemy)
+                            score += 50
+                        projectiles.remove(projectile)
+                        break
+            else:  # Enemy projectile
+                # Check hit on player
+                if projectile.get_rect().colliderect(player.get_rect()):
+                    if player.take_damage():
+                        game_over = True
+                    projectiles.remove(projectile)
+            
+            if projectile.off_screen():
+                projectiles.remove(projectile)
     
     # -------------------- Render --------------------
     # Sky gradient
@@ -432,6 +638,12 @@ while running:
     for collectible in collectibles:
         collectible.draw(screen)
     
+    for enemy in enemies:
+        enemy.draw(screen)
+    
+    for projectile in projectiles:
+        projectile.draw(screen)
+    
     player.draw(screen)
     
     # Camera feed
@@ -450,7 +662,7 @@ while running:
         screen.blit(left_bg, (cam_x + 3, cam_y + 3))
         screen.blit(left_text, (cam_x + 7, cam_y + 5))
         
-        right_color = (255, 165, 0) if "FAST" in right_hand_status else (100, 100, 255) if "SLOW" in right_hand_status else WHITE
+        right_color = (255, 255, 0) if "SHOOT" in right_hand_status else (255, 165, 0) if "FAST" in right_hand_status else (100, 100, 255) if "SLOW" in right_hand_status else WHITE
         right_text = status_font.render(f"R: {right_hand_status}", True, right_color)
         right_bg = pygame.Surface((right_text.get_width() + 8, right_text.get_height() + 4))
         right_bg.fill(BLACK)
@@ -459,7 +671,7 @@ while running:
         screen.blit(right_text, (cam_x + 7, cam_y + 25))
     
     # Score
-    score_text = font.render(f"Score: {score // 10}", True, (255, 200, 50))
+    score_text = font.render(f"Score: {score}", True, (255, 200, 50))
     score_bg = pygame.Surface((score_text.get_width() + 20, score_text.get_height() + 10))
     score_bg.fill(BLACK)
     score_bg.set_alpha(150)
